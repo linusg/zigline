@@ -61,9 +61,9 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
 
         pub const default_operation_mode = Configuration.OperationMode.NonInteractive;
 
-        pub const getStdIn = std.io.getStdIn;
-        pub const getStdOut = std.io.getStdOut;
-        pub const getStdErr = std.io.getStdErr;
+        pub const stdin = std.fs.File.stdin;
+        pub const stdout = std.fs.File.stdout;
+        pub const stderr = std.fs.File.stderr;
 
         pub const winsize = struct {
             col: u16,
@@ -174,7 +174,7 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
 
         const WriterContext = struct {
             console_out: *std.os.uefi.protocol.SimpleTextOutput,
-            attribute: usize,
+            attribute: std.os.uefi.protocol.SimpleTextOutput.Attribute,
         };
 
         const ReaderContext = struct {
@@ -186,9 +186,9 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
             error{},
             struct {
                 fn write(context: WriterContext, bytes: []const u8) error{}!usize {
-                    _ = context.console_out.setAttribute(context.attribute);
+                    context.console_out.setAttribute(context.attribute) catch {};
                     for (bytes) |c| {
-                        _ = context.console_out.outputString(@ptrCast(&[2]u16{ c, 0 }));
+                        _ = context.console_out.outputString(@ptrCast(&[2]u16{ c, 0 })) catch {};
                     }
                     return bytes.len;
                 }
@@ -201,42 +201,36 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
             struct {
                 fn read(context: ReaderContext, bytes: []u8) error{}!usize {
                     var i: usize = 0;
-                    const writer = getStdOut().writer();
-                    var key: std.os.uefi.protocol.SimpleTextInputEx.Key.Input = undefined;
-                    var status: std.os.uefi.Status = .not_ready;
+                    const writer = stdout().writer(&.{});
                     while (true) {
-                        status = context.console_in.readKeyStroke(&key);
-                        if (status == .success) {
-                            if (key.scan_code == 0) {
-                                if (key.unicode_char == 0xd or key.unicode_char == 0xa) {
-                                    bytes[i] = '\n';
-                                    i += 1;
-                                    writer.writeAll("\r\n") catch {};
-                                    break;
-                                }
-
-                                i += std.unicode.utf8Encode(key.unicode_char, bytes[i..]) catch 0;
-                                writer.writeAll(bytes[0..i]) catch {};
+                        const key = context.console_in.readKeyStroke() catch continue;
+                        if (key.scan_code == 0) {
+                            if (key.unicode_char == 0xd or key.unicode_char == 0xa) {
+                                bytes[i] = '\n';
+                                i += 1;
+                                writer.writeAll("\r\n") catch {};
+                                break;
                             }
-                            break;
+
+                            i += std.unicode.utf8Encode(key.unicode_char, bytes[i..]) catch 0;
+                            writer.writeAll(bytes[0..i]) catch {};
                         }
+                        break;
                     }
 
                     while (i < bytes.len) {
-                        status = context.console_in.readKeyStroke(&key);
-                        if (status == .success) {
-                            if (key.scan_code == 0) {
-                                if (key.unicode_char == 0xd or key.unicode_char == 0xa) {
-                                    bytes[i] = '\n';
-                                    i += 1;
-                                    writer.writeAll("\r\n") catch {};
-                                    break;
-                                }
-
-                                i += std.unicode.utf8Encode(key.unicode_char, bytes[i..]) catch 0;
-                                writer.writeAll(bytes[0..i]) catch {};
+                        const key = context.console_in.readKeyStroke() catch break;
+                        if (key.scan_code == 0) {
+                            if (key.unicode_char == 0xd or key.unicode_char == 0xa) {
+                                bytes[i] = '\n';
+                                i += 1;
+                                writer.writeAll("\r\n") catch {};
+                                break;
                             }
-                        } else break;
+
+                            i += std.unicode.utf8Encode(key.unicode_char, bytes[i..]) catch 0;
+                            writer.writeAll(bytes[0..i]) catch {};
+                        }
                     }
                     return i;
                 }
@@ -257,7 +251,7 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
             }
 
             pub fn write(self: *const @This(), bytes: []const u8) !usize {
-                return self.writer().write(bytes);
+                return self.writer(&.{}).write(bytes);
             }
 
             pub fn writeAll(self: *const @This(), bytes: []const u8) !void {
@@ -276,7 +270,7 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
             }
         };
 
-        pub fn getStdIn() File {
+        pub fn stdin() File {
             return File{
                 ._reader = Reader{
                     .context = .{
@@ -287,25 +281,25 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
             };
         }
 
-        pub fn getStdOut() File {
+        pub fn stdout() File {
             return File{
                 ._reader = null,
                 ._writer = Writer{
                     .context = .{
                         .console_out = std.os.uefi.system_table.con_out.?,
-                        .attribute = 0x7, // white
+                        .attribute = .{ .foreground = .white },
                     },
                 },
             };
         }
 
-        pub fn getStdErr() File {
+        pub fn stderr() File {
             return File{
                 ._reader = null,
                 ._writer = Writer{
                     .context = .{
                         .console_out = std.os.uefi.system_table.con_out.?,
-                        .attribute = 0x4, // red
+                        .attribute = .{ .foreground = .red },
                     },
                 },
                 .handle = undefined,
@@ -371,9 +365,9 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
 
         pub const default_operation_mode = Configuration.OperationMode.Full;
 
-        pub const getStdIn = std.io.getStdIn;
-        pub const getStdOut = std.io.getStdOut;
-        pub const getStdErr = std.io.getStdErr;
+        pub const stdin = std.fs.File.stdin;
+        pub const stdout = std.fs.File.stdout;
+        pub const stderr = std.fs.File.stderr;
 
         pub fn getWinsize(handle: anytype) !std.posix.winsize {
             var ws: std.posix.winsize = undefined;
@@ -895,12 +889,12 @@ fn vtMoveRelative(row: i64, col: i64) !void {
         c = -col;
     }
 
-    var writer = SystemCapabilities.getStdErr().writer();
+    var writer = SystemCapabilities.stderr().writer(&.{});
     if (row > 0) {
-        try writer.print("\x1b[{d}{c}", .{ r, x_op });
+        try writer.interface.print("\x1b[{d}{c}", .{ r, x_op });
     }
     if (col > 0) {
-        try writer.print("\x1b[{d}{c}", .{ c, y_op });
+        try writer.interface.print("\x1b[{d}{c}", .{ c, y_op });
     }
 }
 
@@ -914,12 +908,15 @@ var signalHandlingData: ?struct {
 
     pub fn handleSignal(signo: i32) callconv(.c) void {
         var f = std.fs.File{ .handle = signalHandlingData.?.pipe.write };
-        f.writer().writeInt(i32, signo, .little) catch {};
+        var writer = f.writer(&.{});
+        writer.interface.writeInt(i32, signo, .little) catch {};
     }
 } = null;
 
 pub const Editor = struct {
     pub const Error =
+        std.Io.Reader.Error ||
+        std.Io.Writer.Error ||
         std.mem.Allocator.Error ||
         std.posix.MMapError ||
         std.posix.OpenError ||
@@ -1264,7 +1261,7 @@ pub const Editor = struct {
             fn controlThreadMain(self: *Loop) void {
                 defer self.control_thread_exited = true;
 
-                const stdin = SystemCapabilities.getStdIn();
+                const stdin = SystemCapabilities.stdin();
 
                 std.debug.assert(self.thread_kill_pipe != null);
 
@@ -1320,7 +1317,9 @@ pub const Editor = struct {
                         if (pollfds[2].revents & SystemCapabilities.POLL_IN != 0) no_read: {
                             // A signal! Let's handle it.
                             var f = std.fs.File{ .handle = signalHandlingData.?.pipe.read };
-                            const signo = f.reader().readInt(i32, .little) catch {
+                            var buffer: [4]u8 = undefined;
+                            var reader = f.reader(&buffer);
+                            const signo = reader.interface.takeInt(i32, .little) catch {
                                 break :no_read;
                             };
                             switch (signo) {
@@ -1466,7 +1465,8 @@ pub const Editor = struct {
             },
         };
         defer history_file.close();
-        const data = try history_file.reader().readAllAlloc(self.allocator, std.math.maxInt(usize));
+        var reader = history_file.reader(&.{});
+        const data = try reader.interface.allocRemaining(self.allocator, .unlimited);
         defer self.allocator.free(data);
         var it = std.mem.splitSequence(u8, data, "\n\n");
         while (it.next()) |str| {
@@ -1488,9 +1488,9 @@ pub const Editor = struct {
     pub fn saveHistory(self: *Self, path: []const u8) !void {
         var history_file = try std.fs.cwd().createFile(path, .{});
         defer history_file.close();
-        var writer = history_file.writer();
+        var writer = history_file.writer(&.{});
         for (self.history.container.items) |entry| {
-            try writer.print("{}::{s}\n\n", .{ entry.timestamp, entry.entry.container.items });
+            try writer.interface.print("{}::{s}\n\n", .{ entry.timestamp, entry.entry.container.items });
         }
     }
 
@@ -1569,29 +1569,30 @@ pub const Editor = struct {
     }
 
     fn getLineNonInteractive(self: *Self, prompt: []const u8) ![]const u8 {
-        _ = try SystemCapabilities.getStdErr().write(prompt);
+        _ = try SystemCapabilities.stderr().write(prompt);
 
-        var array = ArrayList(u8).init(self.allocator);
-        defer array.deinit();
-
-        streamUntilEol(SystemCapabilities.getStdIn().reader(), array.container.writer()) catch |e| switch (e) {
+        var buffer: [64]u8 = undefined;
+        var buffered_reader = SystemCapabilities.stdin().reader(&buffer);
+        var allocating_writer = std.io.Writer.Allocating.init(self.allocator);
+        streamUntilEol(&buffered_reader.interface, &allocating_writer.writer) catch |e| switch (e) {
             error.EndOfStream => return error.Eof,
             else => return e,
         };
 
-        return array.container.toOwnedSlice();
+        return allocating_writer.toOwnedSlice();
     }
 
-    fn streamUntilEol(reader: anytype, writer: anytype) !void {
+    fn streamUntilEol(reader: *std.Io.Reader, writer: *std.Io.Writer) !void {
         if (!is_windows) {
-            // eol is '\n', so we can just use streamUntilDelimiter.
-            return reader.streamUntilDelimiter(writer, '\n', null);
+            // eol is '\n', so we can just use streamDelimiter.
+            _ = try reader.streamDelimiter(writer, '\n');
+            return;
         }
 
         // Read until '\r', return if '\n' follows, otherwise keep reading.
         while (true) {
-            try reader.streamUntilDelimiter(writer, '\r', null);
-            const byte = try reader.readByte();
+            _ = try reader.streamDelimiter(writer, '\r');
+            const byte = try reader.takeByte();
             if (byte == '\n')
                 return;
             try writer.writeByte('\r');
@@ -1623,12 +1624,12 @@ pub const Editor = struct {
                     signalHandlingData.?.old_sigwinch = @as(SystemCapabilities.Sigaction, undefined);
                     std.posix.sigaction(
                         std.posix.SIG.INT,
-                        &SystemCapabilities.Sigaction{ .handler = .{ .handler = @TypeOf(signalHandlingData.?).handleSignal }, .mask = std.posix.empty_sigset, .flags = 0 },
+                        &SystemCapabilities.Sigaction{ .handler = .{ .handler = @TypeOf(signalHandlingData.?).handleSignal }, .mask = std.posix.sigemptyset(), .flags = 0 },
                         &signalHandlingData.?.old_sigint.?,
                     );
                     std.posix.sigaction(
                         std.posix.SIG.WINCH,
-                        &SystemCapabilities.Sigaction{ .handler = .{ .handler = @TypeOf(signalHandlingData.?).handleSignal }, .mask = std.posix.empty_sigset, .flags = 0 },
+                        &SystemCapabilities.Sigaction{ .handler = .{ .handler = @TypeOf(signalHandlingData.?).handleSignal }, .mask = std.posix.sigemptyset(), .flags = 0 },
                         &signalHandlingData.?.old_sigwinch.?,
                     );
                 }
@@ -1643,7 +1644,7 @@ pub const Editor = struct {
             const old_lines = self.num_lines;
             self.getTerminalSize();
 
-            var stderr = SystemCapabilities.getStdErr();
+            var stderr = SystemCapabilities.stderr();
 
             if (self.configuration.enable_bracketed_paste) {
                 try stderr.writeAll("\x1b[?2004h");
@@ -1766,18 +1767,19 @@ pub const Editor = struct {
             return false;
         }
 
-        _ = SystemCapabilities.getStdErr().write("^C") catch 0;
+        _ = SystemCapabilities.stderr().write("^C") catch 0;
 
         self.buffer.container.clearAndFree();
         self.chars_touched_in_the_middle = 0;
         self.cursor = 0;
 
         {
-            var stream = std.io.bufferedWriter(SystemCapabilities.getStdErr().writer());
-            try self.repositionCursor(&stream, true);
+            var buffer: [4096]u8 = undefined;
+            var buffered_writer = SystemCapabilities.stderr().writer(&buffer);
+            try self.repositionCursor(&buffered_writer.interface, true);
             // FIXME: Suggestion display cleanup.
-            _ = try stream.write("\n");
-            try stream.flush();
+            _ = try buffered_writer.interface.write("\n");
+            try buffered_writer.interface.flush();
         }
 
         self.was_interrupted = true;
@@ -1963,7 +1965,7 @@ pub const Editor = struct {
 
     pub fn clearLine(self: *Self) void {
         _ = self;
-        _ = SystemCapabilities.getStdErr().write("\r\x1b[K") catch unreachable;
+        _ = SystemCapabilities.stderr().write("\r\x1b[K") catch unreachable;
     }
 
     pub fn insertString(self: *Self, string: []const u8) void {
@@ -2085,7 +2087,7 @@ pub const Editor = struct {
         try self.callback_machine.registerKeyInputCallback(&[1]Key{Key{ .code_point = c }}, f);
     }
 
-    fn vtApplyStyle(self: *Self, style: Style, output_stream: anytype, is_starting: bool) !void {
+    fn vtApplyStyle(self: *Self, style: Style, writer: *std.Io.Writer, is_starting: bool) !void {
         _ = self;
 
         var buffer: [128]u8 = undefined;
@@ -2098,7 +2100,7 @@ pub const Editor = struct {
             const fg = try style.foreground.toVTEscape(allocator, .foreground);
             defer allocator.free(fg);
 
-            try output_stream.writer().print("\x1b[{};{};{}m{s}{s}", .{
+            try writer.print("\x1b[{};{};{}m{s}{s}", .{
                 @as(u8, if (style.bold) 1 else 22),
                 @as(u8, if (style.underline) 4 else 24),
                 @as(u8, if (style.italic) 3 else 23),
@@ -2108,23 +2110,22 @@ pub const Editor = struct {
         }
     }
 
-    fn vtMoveAbsolute(self: *Self, row: usize, col: usize, output_stream: anytype) !void {
+    fn vtMoveAbsolute(self: *Self, row: usize, col: usize, writer: *std.Io.Writer) !void {
         _ = self;
-        _ = try output_stream.writer().print("\x1b[{d};{d}H", .{ row, col });
+        _ = try writer.print("\x1b[{d};{d}H", .{ row, col });
     }
 
-    fn vtClearToEndOfLine(self: *Self, output_stream: anytype) !void {
+    fn vtClearToEndOfLine(self: *Self, writer: *std.Io.Writer) !void {
         _ = self;
-        _ = try output_stream.write("\x1b[K");
+        _ = try writer.write("\x1b[K");
     }
 
-    fn vtClearLines(self: *Self, above: usize, below: usize, output_stream: anytype) !void {
+    fn vtClearLines(self: *Self, above: usize, below: usize, writer: *std.Io.Writer) !void {
         if (above + below == 0) {
             return self.clearLine();
         }
 
         // Go down below lines...
-        var writer = output_stream.writer();
         if (below > 0) {
             try writer.print("\x1b[{d}B", .{below});
         }
@@ -2173,7 +2174,7 @@ pub const Editor = struct {
 
         var keybuf = [_]u8{0} ** 32;
 
-        var stdin = SystemCapabilities.getStdIn();
+        var stdin = SystemCapabilities.stdin();
 
         if (self.incomplete_data.container.items.len == 0) {
             const nread = stdin.read(&keybuf) catch |err| {
@@ -2503,13 +2504,13 @@ pub const Editor = struct {
         self.setOriginValues(self.origin_row, 1);
 
         {
-            var stream = std.io.bufferedWriter(SystemCapabilities.getStdErr().writer());
-
-            try self.repositionCursor(&stream, true);
+            var buffer: [4096]u8 = undefined;
+            var buffered_writer = SystemCapabilities.stderr().writer(&buffer);
+            try self.repositionCursor(&buffered_writer.interface, true);
             // FIXME: suggestion_display.redisplay();
-            try self.repositionCursor(&stream, false);
+            try self.repositionCursor(&buffered_writer.interface, false);
 
-            try stream.flush();
+            try buffered_writer.interface.flush();
         }
 
         if (self.is_searching) {
@@ -2525,7 +2526,7 @@ pub const Editor = struct {
     fn vtDSR(self: *Self) ![2]usize {
         var buf = [_]u8{0} ** 32;
         var more_junk_to_read = false;
-        var stdin = SystemCapabilities.getStdIn();
+        var stdin = SystemCapabilities.stdin();
         var pollfds = [1]SystemCapabilities.pollfd{undefined};
         {
             var pollfd: SystemCapabilities.pollfd = undefined;
@@ -2559,7 +2560,7 @@ pub const Editor = struct {
             return fromWrapped(err);
         }
 
-        var stderr = SystemCapabilities.getStdErr();
+        var stderr = SystemCapabilities.stderr();
         _ = try stderr.write("\x1b[6n");
 
         var state: enum {
@@ -2738,7 +2739,7 @@ pub const Editor = struct {
             }
 
             if (!found) {
-                _ = SystemCapabilities.getStdErr().write("\x07") catch 0;
+                _ = SystemCapabilities.stderr().write("\x07") catch 0;
             }
         }
 
@@ -2801,10 +2802,11 @@ pub const Editor = struct {
             return;
         }
 
-        var buffered_output = std.io.bufferedWriter(SystemCapabilities.getStdErr().writer());
+        var buffer: [4096]u8 = undefined;
+        var buffered_writer = SystemCapabilities.stderr().writer(&buffer);
         defer {
             self.shown_lines = self.currentPromptMetrics().linesWithAddition(self.cached_buffer_metrics, self.num_columns);
-            _ = buffered_output.flush() catch {};
+            _ = buffered_writer.interface.flush() catch {};
         }
 
         const has_cleaned_up = false;
@@ -2832,21 +2834,21 @@ pub const Editor = struct {
         if (self.origin_row + current_num_lines > self.num_lines) {
             if (current_num_lines > self.num_lines) {
                 for (0..self.num_lines) |_| {
-                    _ = try buffered_output.write("\n");
+                    _ = try buffered_writer.interface.write("\n");
                 }
                 self.origin_row = 0;
             } else {
                 const old_origin_row = self.origin_row;
                 self.origin_row = self.num_lines - current_num_lines + 1;
                 for (0..old_origin_row - self.origin_row) |_| {
-                    _ = try buffered_output.write("\n");
+                    _ = try buffered_writer.interface.write("\n");
                 }
             }
         }
 
         // Do not call hook on pure cursor movements.
         if (self.cached_prompt_valid and !self.refresh_needed and self.pending_chars.container.items.len == 0) {
-            try self.repositionCursor(&buffered_output, false);
+            try self.repositionCursor(&buffered_writer.interface, false);
             self.cached_buffer_metrics.deinit();
             self.cached_buffer_metrics = try self.actualRenderedUnicodeStringMetrics(self.buffer.container.items);
             self.drawn_end_of_line_offset = self.buffer.size();
@@ -2865,10 +2867,10 @@ pub const Editor = struct {
                 // Just write the characters out and continue,
                 // no need to refresh anything else.
                 for (self.drawn_cursor..self.buffer.size()) |i| {
-                    try self.applyStyles(&empty_styles, &buffered_output, i);
-                    try self.printCharacterAt(i, &buffered_output);
+                    try self.applyStyles(&empty_styles, &buffered_writer.interface, i);
+                    try self.printCharacterAt(i, &buffered_writer.interface);
                 }
-                try self.vtApplyStyle(Style.resetStyle(), &buffered_output, true);
+                try self.vtApplyStyle(Style.resetStyle(), &buffered_writer.interface, true);
                 self.pending_chars.container.clearAndFree();
                 self.drawn_cursor = self.cursor;
                 self.drawn_end_of_line_offset = self.buffer.size();
@@ -2883,18 +2885,18 @@ pub const Editor = struct {
             try self.cleanup();
         }
 
-        try self.vtMoveAbsolute(self.origin_row, self.origin_column, &buffered_output);
+        try self.vtMoveAbsolute(self.origin_row, self.origin_column, &buffered_writer.interface);
 
-        _ = try buffered_output.write(self.new_prompt.container.items);
+        _ = try buffered_writer.interface.write(self.new_prompt.container.items);
 
-        try self.vtClearToEndOfLine(&buffered_output);
+        try self.vtClearToEndOfLine(&buffered_writer.interface);
 
         for (0..self.buffer.size()) |i| {
-            try self.applyStyles(&empty_styles, &buffered_output, i);
-            try self.printCharacterAt(i, &buffered_output);
+            try self.applyStyles(&empty_styles, &buffered_writer.interface, i);
+            try self.printCharacterAt(i, &buffered_writer.interface);
         }
 
-        try self.vtApplyStyle(Style.resetStyle(), &buffered_output, true);
+        try self.vtApplyStyle(Style.resetStyle(), &buffered_writer.interface, true);
 
         self.pending_chars.container.clearAndFree();
         self.refresh_needed = false;
@@ -2904,7 +2906,7 @@ pub const Editor = struct {
         self.drawn_end_of_line_offset = self.buffer.size();
         self.cached_prompt_valid = true;
 
-        try self.repositionCursor(&buffered_output, false);
+        try self.repositionCursor(&buffered_writer.interface, false);
     }
 
     pub fn setHandler(self: *Self, handler: anytype) void {
@@ -2924,7 +2926,7 @@ pub const Editor = struct {
         }
     }
 
-    fn applyStyles(self: *Self, empty_styles: *AutoHashMap(usize, Style), output_stream: anytype, index: usize) !void {
+    fn applyStyles(self: *Self, empty_styles: *AutoHashMap(usize, Style), writer: *std.Io.Writer, index: usize) !void {
         const HM = AutoHashMap(usize, AutoHashMap(usize, Style));
         var ends = (self.current_spans.ending.container.getEntry(index) orelse HM.Entry{
             .value_ptr = empty_styles,
@@ -2945,11 +2947,11 @@ pub const Editor = struct {
             }
 
             // Disable any style that should be turned off.
-            try self.vtApplyStyle(style, output_stream, false);
+            try self.vtApplyStyle(style, writer, false);
 
             // Reapply styles for overlapping spans that include this one.
             style = self.findApplicableStyle(index);
-            try self.vtApplyStyle(style, output_stream, true);
+            try self.vtApplyStyle(style, writer, true);
         }
 
         if (starts.container.count() > 0) {
@@ -2960,15 +2962,15 @@ pub const Editor = struct {
             }
 
             // Set new styles.
-            try self.vtApplyStyle(style, output_stream, true);
+            try self.vtApplyStyle(style, writer, true);
         }
     }
 
-    fn printCharacterAt(self: *Self, index: usize, output_stream: anytype) !void {
-        return self.printSingleCharacter(self.buffer.container.items[index], output_stream);
+    fn printCharacterAt(self: *Self, index: usize, writer: *std.Io.Writer) !void {
+        return self.printSingleCharacter(self.buffer.container.items[index], writer);
     }
 
-    fn printSingleCharacter(self: *Self, code_point: u32, output_stream: anytype) !void {
+    fn printSingleCharacter(self: *Self, code_point: u32, writer: *std.Io.Writer) !void {
         var buffer = std.ArrayList(u8).init(self.allocator);
         defer buffer.deinit();
 
@@ -2984,7 +2986,7 @@ pub const Editor = struct {
             _ = try std.unicode.utf8Encode(c, buffer.items[buffer.items.len - length .. buffer.items.len]);
         }
 
-        _ = try output_stream.write(buffer.items);
+        _ = try writer.write(buffer.items);
     }
 
     fn cleanup(self: *Self) !void {
@@ -2997,12 +2999,12 @@ pub const Editor = struct {
             self.extra_forward_lines = @max(shown_lines - new_lines, self.extra_forward_lines);
         }
 
-        var stderr = SystemCapabilities.getStdErr();
-        try self.repositionCursor(&stderr, true);
+        var writer = SystemCapabilities.stderr().writer(&.{});
+        try self.repositionCursor(&writer.interface, true);
         const current_line = self.numLines();
-        try self.vtClearLines(current_line, self.extra_forward_lines, &stderr);
+        try self.vtClearLines(current_line, self.extra_forward_lines, &writer.interface);
         self.extra_forward_lines = 0;
-        try self.repositionCursor(&stderr, false);
+        try self.repositionCursor(&writer.interface, false);
     }
 
     fn cleanupSuggestions(self: *Self) !void {
@@ -3011,10 +3013,9 @@ pub const Editor = struct {
 
     fn reallyQuitEventLoop(self: *Self) !void {
         self.finished = false;
-        var stderr = SystemCapabilities.getStdErr();
-        var stream = stderr.writer();
-        try self.repositionCursor(&stderr, true);
-        _ = try stream.write("\n");
+        var writer = SystemCapabilities.stderr().writer(&.{});
+        try self.repositionCursor(&writer.interface, true);
+        _ = try writer.interface.write("\n");
 
         const str = try self.getBufferedLine();
         self.buffer.container.clearAndFree();
@@ -3035,7 +3036,7 @@ pub const Editor = struct {
         try setTermios(self.default_termios);
         self.initialized = false;
         if (self.configuration.enable_bracketed_paste) {
-            var stderr = SystemCapabilities.getStdErr();
+            var stderr = SystemCapabilities.stderr();
             try stderr.writeAll("\x1b[?2004l");
         }
     }
@@ -3097,7 +3098,7 @@ pub const Editor = struct {
         _ = self;
     }
 
-    fn repositionCursor(self: *Self, output_stream: anytype, to_end: bool) !void {
+    fn repositionCursor(self: *Self, writer: *std.Io.Writer, to_end: bool) !void {
         var cursor = self.cursor;
         const saved_cursor = cursor;
         if (to_end) {
@@ -3112,7 +3113,7 @@ pub const Editor = struct {
 
         self.ensureFreeLinesFromOrigin(line);
 
-        try self.vtMoveAbsolute(line + self.origin_row, column + self.origin_column, output_stream);
+        try self.vtMoveAbsolute(line + self.origin_row, column + self.origin_column, writer);
 
         self.cursor = saved_cursor;
     }
@@ -3141,7 +3142,7 @@ pub const Editor = struct {
         self.num_columns = 80;
         self.num_lines = 24;
         if (!is_windows) {
-            const ws = SystemCapabilities.getWinsize(SystemCapabilities.getStdIn().handle) catch {
+            const ws = SystemCapabilities.getWinsize(SystemCapabilities.stdin().handle) catch {
                 return;
             };
             self.num_columns = ws.col;
@@ -3164,10 +3165,10 @@ pub const Editor = struct {
     }
 
     pub fn clearScreen(self: *Self) bool {
-        var stderr = SystemCapabilities.getStdErr();
-        _ = stderr.write("\x1b[3J\x1b[H\x1b[2J") catch 0;
+        var writer = SystemCapabilities.stderr().writer(&.{});
+        _ = writer.interface.write("\x1b[3J\x1b[H\x1b[2J") catch 0;
 
-        self.vtMoveAbsolute(1, 1, &stderr) catch {};
+        self.vtMoveAbsolute(1, 1, &writer.interface) catch {};
         self.setOriginValues(1, 1);
         self.refresh_needed = true;
         self.cached_prompt_valid = false;
@@ -3180,7 +3181,7 @@ pub const Editor = struct {
         }
 
         if (self.cursor == 0) {
-            _ = SystemCapabilities.getStdErr().write("\x07") catch 0; // \a BEL
+            _ = SystemCapabilities.stderr().write("\x07") catch 0; // \a BEL
             return false;
         }
 
@@ -3197,7 +3198,7 @@ pub const Editor = struct {
         }
 
         if (self.cursor == self.buffer.size()) {
-            _ = SystemCapabilities.getStdErr().write("\x07") catch 0; // \a BEL
+            _ = SystemCapabilities.stderr().write("\x07") catch 0; // \a BEL
             return false;
         }
 
@@ -3296,7 +3297,7 @@ pub const Editor = struct {
         self.prohibitInput();
         defer self.allowInput();
 
-        _ = SystemCapabilities.getStdErr().write("<EOF>\n") catch 0;
+        _ = SystemCapabilities.stderr().write("<EOF>\n") catch 0;
         if (!self.always_refresh) {
             self.input_error = toWrapped(Error, error.Eof);
             _ = self.finish();

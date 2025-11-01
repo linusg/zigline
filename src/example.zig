@@ -20,19 +20,27 @@ pub const std_options: std.Options = switch (builtin.os.tag) {
 
 pub fn main() void {
     switch (builtin.os.tag) {
-        .uefi => main_uefi(std.os.uefi.pool_allocator) catch {},
+        .uefi => {
+            const gpa = std.os.uefi.pool_allocator;
+            main_uefi(gpa) catch {};
+        },
         else => {
             var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
             defer _ = debug_allocator.deinit();
-            main_generic(debug_allocator.allocator()) catch |err| {
+            const gpa = debug_allocator.allocator();
+
+            var threaded: std.Io.Threaded = .init_single_threaded;
+            const io = threaded.ioBasic();
+
+            main_generic(gpa, io) catch |err| {
                 std.debug.print("Error: {t}\n", .{err});
             };
         },
     }
 }
 
-fn main_generic(allocator: std.mem.Allocator) !void {
-    var editor = Editor.init(allocator, .{});
+fn main_generic(allocator: std.mem.Allocator, io: std.Io) !void {
+    var editor = Editor.init(allocator, io, .{});
     defer editor.deinit();
 
     try editor.loadHistory("test.hist");
@@ -145,7 +153,7 @@ fn main_generic(allocator: std.mem.Allocator) !void {
 }
 
 fn main_uefi(allocator: std.mem.Allocator) !void {
-    var editor = Editor.init(allocator, .{});
+    var editor = Editor.init(allocator, undefined, .{});
     defer editor.deinit();
 
     // kiesel: src/branch/main/src/uefi.zig

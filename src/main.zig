@@ -325,7 +325,7 @@ pub const SystemCapabilities = switch (builtin.os.tag) {
         }
 
         pub fn getTermiosCC(t: Self.termios, cc: Self.V) u8 {
-            return t.cc[@intFromEnum(cc)];
+            return t.cc[@backingInt(cc)];
         }
 
         pub const POLL_IN = std.posix.POLL.IN;
@@ -473,7 +473,7 @@ pub const Style = struct {
                     return try std.fmt.allocPrint(
                         allocator,
                         "\x1b[{d}m",
-                        .{@intFromEnum(xterm) + @as(u8, if (role == .background) 40 else 30)},
+                        .{@backingInt(xterm) + @as(u8, if (role == .background) 40 else 30)},
                     );
                 },
                 .rgb => |rgb| {
@@ -1199,7 +1199,7 @@ var signalHandlingData: ?struct {
         var buffer: [4]u8 = undefined;
         var file_writer = file.writerStreaming(io, &buffer);
         const writer = &file_writer.interface;
-        writer.writeInt(u32, @intFromEnum(sig), .little) catch {};
+        writer.writeInt(u32, @backingInt(sig), .little) catch {};
     }
 } = null;
 
@@ -2658,7 +2658,7 @@ pub const Editor = struct {
 
                         var modifiers: CSIMod = .none;
                         if (param2 != 0) {
-                            modifiers = @enumFromInt(@as(u8, @intCast(param2 - 1)));
+                            modifiers = @fromBackingInt(@intCast(param2 - 1));
                         }
 
                         if (is_in_paste and code_point != '~' and param1 != 201) {
@@ -3401,10 +3401,10 @@ pub const Editor = struct {
 
         const InnerT = @TypeOf(handler.*);
 
-        inline for (@typeInfo(InnerT).@"struct".decls) |decl| {
-            const h = &@field(self.on, decl.name);
+        inline for (@typeInfo(InnerT).@"struct".decl_names) |decl_name| {
+            const h = &@field(self.on, decl_name);
             h.* = .{
-                .f = &@TypeOf(h.*.?).makeHandler(T, InnerT, decl.name).theHandler,
+                .f = &@TypeOf(h.*.?).makeHandler(T, InnerT, decl_name).theHandler,
                 .context = handler,
             };
         }
